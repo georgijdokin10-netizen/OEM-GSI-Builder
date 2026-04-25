@@ -26,7 +26,7 @@ jobs:
           required "${{ steps.config.outputs.url }}" "URL config"
           required "${{ steps.config.outputs.firmware_type }}" "FIRMWARE_TYPE config"
           required "${{ steps.config.outputs.output_type }}" "OUTPUT_TYPE config"
-          # Проверка секретов для SourceForge отключена
+          # SourceForge secrets are not required if SOURCEFORGE_DIR=0
 
       - name: Cache ErfanGSIs tools
         id: cache-erfan
@@ -41,6 +41,9 @@ jobs:
       - name: Setup ErfanGSIs Tools
         if: steps.cache-erfan.outputs.cache-hit != 'true'
         run: |
+          sudo apt update
+          sudo apt install -y python3 python3-pip
+          pip3 install --upgrade pip
           git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo || 'https://github.com/erfanoabdi/ErfanGSIs' }}"
           bash ErfanGSIs/setup.sh
           sed -i '$d' ErfanGSIs/url2GSI.sh
@@ -54,14 +57,26 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          mkdir build/
+          mkdir -p build/
           if ls ErfanGSIs/output/*.img 1> /dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.img build/
-            gzip -r build/
+            sudo gzip -r build/
+            sudo chown -R $USER:$USER build/   # ensure GitHub Actions can read the files
           fi
           if ls ErfanGSIs/output/*.txt 1> /dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.txt build/
+            sudo chown $USER:$USER build/*.txt
           fi
+
+      - name: Upload to SourceForge (if needed)
+        if: steps.config.outputs.sourceforge_dir != '0'
+        env:
+          SF_USERNAME: ${{ secrets.USERNAME }}
+          SF_PASSWORD: ${{ secrets.PASSWORD }}
+        run: |
+          sudo apt-get install -y sshpass
+          ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
+          sshpass -p "$SF_PASSWORD" rsync -arsP -e ssh build/ "${SF_USERNAME}@frs.sourceforge.net:${{ steps.config.outputs.sourceforge_dir }}"
 
       - name: Upload artifact to GitHub
         uses: actions/upload-artifact@v4
