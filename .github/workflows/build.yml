@@ -11,6 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      # ---------- Шаги со скриншота ----------
+      - name: Set up job
+        uses: actions/checkout@v4
+
       - name: Checkout (latest)
         uses: actions/checkout@v4
 
@@ -31,25 +35,25 @@ jobs:
         id: normalize
         run: |
           type="${{ steps.config.outputs.firmware_type }}"
-          # Case-insensitive mapping to the correct ErfanGSIs ROM name
-          case "${type,,}" in
-            generic)      normalized="Generic" ;;
-            miui)         normalized="MIUI" ;;
-            pixel)        normalized="Pixel" ;;
-            oxygenos)     normalized="OxygenOS" ;;
-            oneui)        normalized="OneUI" ;;
-            flyme)        normalized="Flyme" ;;
-            coloros)      normalized="ColorOS" ;;
-            moto)         normalized="Moto" ;;
-            nubia)        normalized="Nubia" ;;
-            xperia)       normalized="Xperia" ;;
-            zui)          normalized="ZUI" ;;
-            zenui)        normalized="ZenUI" ;;
-            *)            normalized="$type" ;;  # fallback for any other
+          # Убираем версию, если есть (например, "Generic-10" -> "Generic")
+          base="${type%%-*}"
+          case "${base,,}" in
+            generic)      norm="Generic" ;;
+            miui)         norm="MIUI" ;;
+            pixel)        norm="Pixel" ;;
+            oxygenos)     norm="OxygenOS" ;;
+            oneui)        norm="OneUI" ;;
+            flyme)        norm="Flyme" ;;
+            coloros)      norm="ColorOS" ;;
+            moto)         norm="Moto" ;;
+            nubia)        norm="Nubia" ;;
+            xperia)       norm="Xperia" ;;
+            zui)          norm="ZUI" ;;
+            zenui)        norm="ZenUI" ;;
+            *)            norm="$base" ;;
           esac
-          echo "original=$type" >> $GITHUB_OUTPUT
-          echo "normalized=$normalized" >> $GITHUB_OUTPUT
-          echo "Using normalized firmware type: $normalized"
+          echo "norm=$norm" >> $GITHUB_OUTPUT
+          echo "::notice::Firmware type normalized to: $norm"
 
       - name: Cache ErfanGSIs tools
         id: cache-erfan
@@ -69,14 +73,24 @@ jobs:
           pip3 install --upgrade pip
           git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo || 'https://github.com/erfanoabdi/ErfanGSIs' }}"
           bash ErfanGSIs/setup.sh
-          sed -i '$d' ErfanGSIs/url2GSI.sh
+          # ⚠️ Не удаляем последнюю строку – она важна для работы!
+          # sed -i '$d' ErfanGSIs/url2GSI.sh  ← ЗАКОММЕНТИРОВАНО / УДАЛЕНО
 
       - name: Build GSI
         run: |
-          sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" \
-            "${{ steps.normalize.outputs.normalized }}" \
-            ${{ steps.config.outputs.output_type == 'ab' && '--ab' || (steps.config.outputs.output_type == 'a' && '--aonly' || '') }} \
-            ${{ steps.config.outputs.extra_args }}
+          set -e   # останавливаемся при любой ошибке
+          # Сборка флагов
+          flags=""
+          if [[ "${{ steps.config.outputs.output_type }}" == "ab" ]]; then
+            flags="--ab"
+          elif [[ "${{ steps.config.outputs.output_type }}" == "a" ]]; then
+            flags="--aonly"
+          fi
+          if [[ -n "${{ steps.config.outputs.extra_args }}" ]]; then
+            flags="$flags ${{ steps.config.outputs.extra_args }}"
+          fi
+          echo "Running: url2GSI.sh \"${{ steps.config.outputs.url }}\" \"${{ steps.normalize.outputs.norm }}\" $flags"
+          sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" "${{ steps.normalize.outputs.norm }}" $flags
 
       - name: Prepare artifacts
         run: |
@@ -107,3 +121,7 @@ jobs:
           name: ErfanGSI-Output
           path: build/
           retention-days: 7
+
+      # ------ Post-шаги (автоматические) ------
+      # Post Cache ErfanGSIs tools
+      # Post Checkout (latest)
