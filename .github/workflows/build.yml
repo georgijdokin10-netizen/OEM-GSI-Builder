@@ -1,75 +1,72 @@
-name: OEM GSI Builder (Optimized)
+name: OEM GSI Builder (Stable)
 
 on:
   workflow_dispatch:
-
-defaults:
-  run:
-    shell: bash
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout (latest)
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Load Configuration
-        uses: falti/dotenv-action@v1.0.0
+      - name: Read configuration
         id: config
-        with:
-          path: config.env
-
-      - name: Check Configuration
         run: |
-          required() { if [[ -z "$1" ]]; then echo "$2 variable can't be null." && exit 1; fi }
-          required "${{ steps.config.outputs.url }}" "URL config"
-          required "${{ steps.config.outputs.firmware_type }}" "FIRMWARE_TYPE config"
-          required "${{ steps.config.outputs.output_type }}" "OUTPUT_TYPE config"
+          set -a
+          source config.env
+          echo "url=${url}" >> $GITHUB_OUTPUT
+          echo "firmware_type=${firmware_type}" >> $GITHUB_OUTPUT
+          echo "output_type=${output_type}" >> $GITHUB_OUTPUT
+          echo "extra_args=${extra_args}" >> $GITHUB_OUTPUT
+          echo "tool_repo=${tool_repo:-https://github.com/iamlooper/ErfanGSIs}" >> $GITHUB_OUTPUT
+          echo "sourceforge_dir=${sourceforge_dir:-0}" >> $GITHUB_OUTPUT
 
-      - name: Normalize firmware type
-        id: normalize
-        run: |
-          type="${{ steps.config.outputs.firmware_type }}"
-          # Убираем суффикс с версией (например, "generic-10" -> "generic")
+          # Нормализация имени прошивки
+          type="${firmware_type}"
           base="${type%%-*}"
           case "${base,,}" in
-            generic)      norm="Generic" ;;
-            miui)         norm="MIUI" ;;
-            pixel)        norm="Pixel" ;;
-            oxygenos)     norm="OxygenOS" ;;
-            oneui)        norm="OneUI" ;;
-            flyme)        norm="Flyme" ;;
-            coloros)      norm="ColorOS" ;;
-            moto)         norm="Moto" ;;
-            nubia)        norm="Nubia" ;;
-            xperia)       norm="Xperia" ;;
-            zui)          norm="ZUI" ;;
-            zenui)        norm="ZenUI" ;;
-            *)            norm="$base" ;;
+            generic)   norm="Generic" ;;
+            miui)      norm="MIUI" ;;
+            pixel)     norm="Pixel" ;;
+            oxygenos)  norm="OxygenOS" ;;
+            oneui)     norm="OneUI" ;;
+            flyme)     norm="Flyme" ;;
+            coloros)   norm="ColorOS" ;;
+            moto)      norm="Moto" ;;
+            nubia)     norm="Nubia" ;;
+            xperia)    norm="Xperia" ;;
+            zui)       norm="ZUI" ;;
+            zenui)     norm="ZenUI" ;;
+            *)         norm="$base" ;;
           esac
-          echo "norm=$norm" >> $GITHUB_OUTPUT
-          echo "::notice::Нормализованный тип прошивки: $norm"
+          echo "norm_firmware=$norm" >> $GITHUB_OUTPUT
+          echo "::notice::Normalized firmware type: $norm"
+
+      - name: Validate configuration
+        run: |
+          required() { if [[ -z "$1" ]]; then echo "ERROR: $2 is missing in config.env" && exit 1; fi }
+          required "${{ steps.config.outputs.url }}" "url"
+          required "${{ steps.config.outputs.firmware_type }}" "firmware_type"
+          required "${{ steps.config.outputs.output_type }}" "output_type"
+          required "${{ steps.config.outputs.tool_repo }}" "tool_repo"
 
       - name: Cache ErfanGSIs tools
-        id: cache-erfan
+        id: cache
         uses: actions/cache@v4
         with:
           path: ErfanGSIs
-          key: erfan-gsi-${{ hashFiles('config.env') }}-${{ github.run_id }}
-          restore-keys: |
-            erfan-gsi-
+          key: erfan-gsi-${{ steps.config.outputs.tool_repo }}-${{ hashFiles('config.env') }}-v2
 
-      - name: Setup ErfanGSIs Tools
-        if: steps.cache-erfan.outputs.cache-hit != 'true'
+      - name: Install dependencies & clone tools
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt update
-          sudo apt install -y python3 python3-pip
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip git
           pip3 install --upgrade pip
-          # Используем репозиторий из конфига (по умолчанию – форк с поддержкой Android 15)
-          git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo || 'https://github.com/iamlooper/ErfanGSIs' }}"
-          bash ErfanGSIs/setup.sh
-          # sed -i '$d' ErfanGSIs/url2GSI.sh  <-- НЕ удаляем последнюю строку!
+          git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo }}" ErfanGSIs
+          cd ErfanGSIs
+          bash setup.sh
 
       - name: Build GSI
         run: |
@@ -80,23 +77,23 @@ jobs:
           elif [[ "${{ steps.config.outputs.output_type }}" == "a" ]]; then
             flags="--aonly"
           fi
-          if [[ -n "${{ steps.config.outputs.extra_args }}" ]]; then
-            flags="$flags ${{ steps.config.outputs.extra_args }}"
-          fi
-          echo "Старт сборки: url2GSI.sh \"${{ steps.config.outputs.url }}\" \"${{ steps.normalize.outputs.norm }}\" $flags"
-          sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" "${{ steps.normalize.outputs.norm }}" $flags
+          extra="${{ steps.config.outputs.extra_args }}"
+          [[ -n "$extra" ]] && flags="$flags $extra"
+
+          echo "Starting build: ${{ steps.config.outputs.url }} ${{ steps.config.outputs.norm_firmware }} $flags"
+          sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" "${{ steps.config.outputs.norm_firmware }}" $flags
 
       - name: Prepare artifacts
         run: |
           mkdir -p build/
-          if ls ErfanGSIs/output/*.img 1> /dev/null 2>&1; then
+          if ls ErfanGSIs/output/*.img 1>/dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.img build/
             sudo gzip -r build/
-            sudo chown -R $USER:$USER build/
+            sudo chown -R $(whoami):$(whoami) build/
           fi
-          if ls ErfanGSIs/output/*.txt 1> /dev/null 2>&1; then
+          if ls ErfanGSIs/output/*.txt 1>/dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.txt build/
-            sudo chown $USER:$USER build/*.txt
+            sudo chown $(whoami):$(whoami) build/*.txt
           fi
 
       - name: Upload to SourceForge (if needed)
@@ -106,6 +103,7 @@ jobs:
           SF_PASSWORD: ${{ secrets.PASSWORD }}
         run: |
           sudo apt-get install -y sshpass
+          mkdir -p ~/.ssh
           ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
           sshpass -p "$SF_PASSWORD" rsync -arsP -e ssh build/ "${SF_USERNAME}@frs.sourceforge.net:${{ steps.config.outputs.sourceforge_dir }}"
 
