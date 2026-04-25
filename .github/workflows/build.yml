@@ -26,10 +26,7 @@ jobs:
           required "${{ steps.config.outputs.url }}" "URL config"
           required "${{ steps.config.outputs.firmware_type }}" "FIRMWARE_TYPE config"
           required "${{ steps.config.outputs.output_type }}" "OUTPUT_TYPE config"
-          if [[ "${{ steps.config.outputs.sourceforge_dir }}" != "0" ]]; then
-            required "${{ secrets.USERNAME }}" "USERNAME secret"
-            required "${{ secrets.PASSWORD }}" "PASSWORD secret"
-          fi
+          # Проверка секретов для SourceForge отключена
 
       - name: Cache ErfanGSIs tools
         id: cache-erfan
@@ -65,16 +62,6 @@ jobs:
           if ls ErfanGSIs/output/*.txt 1> /dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.txt build/
           fi
-
-      - name: Upload to SourceForge (if needed)
-        if: ${{ steps.config.outputs.sourceforge_dir != '0' }}
-        env:
-          SF_USERNAME: ${{ secrets.USERNAME }}
-          SF_PASSWORD: ${{ secrets.PASSWORD }}
-        run: |
-          sudo apt-get install -y sshpass
-          ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
-          sshpass -p "$SF_PASSWORD" rsync -arsP -e ssh build/ "${SF_USERNAME}@frs.sourceforge.net:${{ steps.config.outputs.sourceforge_dir }}"
 
       - name: Upload artifact to GitHub
         uses: actions/upload-artifact@v4
