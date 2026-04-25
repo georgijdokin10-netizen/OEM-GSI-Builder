@@ -26,7 +26,30 @@ jobs:
           required "${{ steps.config.outputs.url }}" "URL config"
           required "${{ steps.config.outputs.firmware_type }}" "FIRMWARE_TYPE config"
           required "${{ steps.config.outputs.output_type }}" "OUTPUT_TYPE config"
-          # SourceForge secrets are not required if SOURCEFORGE_DIR=0
+
+      - name: Normalize firmware type
+        id: normalize
+        run: |
+          type="${{ steps.config.outputs.firmware_type }}"
+          # Case-insensitive mapping to the correct ErfanGSIs ROM name
+          case "${type,,}" in
+            generic)      normalized="Generic" ;;
+            miui)         normalized="MIUI" ;;
+            pixel)        normalized="Pixel" ;;
+            oxygenos)     normalized="OxygenOS" ;;
+            oneui)        normalized="OneUI" ;;
+            flyme)        normalized="Flyme" ;;
+            coloros)      normalized="ColorOS" ;;
+            moto)         normalized="Moto" ;;
+            nubia)        normalized="Nubia" ;;
+            xperia)       normalized="Xperia" ;;
+            zui)          normalized="ZUI" ;;
+            zenui)        normalized="ZenUI" ;;
+            *)            normalized="$type" ;;  # fallback for any other
+          esac
+          echo "original=$type" >> $GITHUB_OUTPUT
+          echo "normalized=$normalized" >> $GITHUB_OUTPUT
+          echo "Using normalized firmware type: $normalized"
 
       - name: Cache ErfanGSIs tools
         id: cache-erfan
@@ -51,7 +74,7 @@ jobs:
       - name: Build GSI
         run: |
           sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" \
-            "${{ steps.config.outputs.firmware_type }}" \
+            "${{ steps.normalize.outputs.normalized }}" \
             ${{ steps.config.outputs.output_type == 'ab' && '--ab' || (steps.config.outputs.output_type == 'a' && '--aonly' || '') }} \
             ${{ steps.config.outputs.extra_args }}
 
@@ -61,7 +84,7 @@ jobs:
           if ls ErfanGSIs/output/*.img 1> /dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.img build/
             sudo gzip -r build/
-            sudo chown -R $USER:$USER build/   # ensure GitHub Actions can read the files
+            sudo chown -R $USER:$USER build/
           fi
           if ls ErfanGSIs/output/*.txt 1> /dev/null 2>&1; then
             sudo mv ErfanGSIs/output/*.txt build/
