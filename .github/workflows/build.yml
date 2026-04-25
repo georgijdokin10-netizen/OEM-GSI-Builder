@@ -11,10 +11,6 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      # ---------- Шаги со скриншота ----------
-      - name: Set up job
-        uses: actions/checkout@v4
-
       - name: Checkout (latest)
         uses: actions/checkout@v4
 
@@ -35,7 +31,7 @@ jobs:
         id: normalize
         run: |
           type="${{ steps.config.outputs.firmware_type }}"
-          # Убираем версию, если есть (например, "Generic-10" -> "Generic")
+          # Убираем суффикс с версией (например, "generic-10" -> "generic")
           base="${type%%-*}"
           case "${base,,}" in
             generic)      norm="Generic" ;;
@@ -53,7 +49,7 @@ jobs:
             *)            norm="$base" ;;
           esac
           echo "norm=$norm" >> $GITHUB_OUTPUT
-          echo "::notice::Firmware type normalized to: $norm"
+          echo "::notice::Нормализованный тип прошивки: $norm"
 
       - name: Cache ErfanGSIs tools
         id: cache-erfan
@@ -63,7 +59,6 @@ jobs:
           key: erfan-gsi-${{ hashFiles('config.env') }}-${{ github.run_id }}
           restore-keys: |
             erfan-gsi-
-            erfan-gsi
 
       - name: Setup ErfanGSIs Tools
         if: steps.cache-erfan.outputs.cache-hit != 'true'
@@ -71,15 +66,14 @@ jobs:
           sudo apt update
           sudo apt install -y python3 python3-pip
           pip3 install --upgrade pip
-          git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo || 'https://github.com/erfanoabdi/ErfanGSIs' }}"
+          # Используем репозиторий из конфига (по умолчанию – форк с поддержкой Android 15)
+          git clone --recurse-submodules --depth 1 "${{ steps.config.outputs.tool_repo || 'https://github.com/iamlooper/ErfanGSIs' }}"
           bash ErfanGSIs/setup.sh
-          # ⚠️ Не удаляем последнюю строку – она важна для работы!
-          # sed -i '$d' ErfanGSIs/url2GSI.sh  ← ЗАКОММЕНТИРОВАНО / УДАЛЕНО
+          # sed -i '$d' ErfanGSIs/url2GSI.sh  <-- НЕ удаляем последнюю строку!
 
       - name: Build GSI
         run: |
-          set -e   # останавливаемся при любой ошибке
-          # Сборка флагов
+          set -e
           flags=""
           if [[ "${{ steps.config.outputs.output_type }}" == "ab" ]]; then
             flags="--ab"
@@ -89,7 +83,7 @@ jobs:
           if [[ -n "${{ steps.config.outputs.extra_args }}" ]]; then
             flags="$flags ${{ steps.config.outputs.extra_args }}"
           fi
-          echo "Running: url2GSI.sh \"${{ steps.config.outputs.url }}\" \"${{ steps.normalize.outputs.norm }}\" $flags"
+          echo "Старт сборки: url2GSI.sh \"${{ steps.config.outputs.url }}\" \"${{ steps.normalize.outputs.norm }}\" $flags"
           sudo ./ErfanGSIs/url2GSI.sh "${{ steps.config.outputs.url }}" "${{ steps.normalize.outputs.norm }}" $flags
 
       - name: Prepare artifacts
@@ -121,7 +115,3 @@ jobs:
           name: ErfanGSI-Output
           path: build/
           retention-days: 7
-
-      # ------ Post-шаги (автоматические) ------
-      # Post Cache ErfanGSIs tools
-      # Post Checkout (latest)
